@@ -77,7 +77,8 @@ class DenseLayer(lasagne.layers.DenseLayer): # H determines the range of the wei
         
         self._srng = RandomStreams(lasagne.random.get_rng().randint(1, 2147462579))
         if self.discrete:
-            super(DenseLayer, self).__init__(incoming, num_units, W=lasagne.init.Uniform((-self.H,self.H)), **kwargs)
+            # super(DenseLayer, self).__init__(incoming, num_units, W=lasagne.init.Uniform((-self.H,self.H)), **kwargs)
+            super(DenseLayer, self).__init__(incoming, num_units, W=lasagne.init.Constant(self.H), **kwargs)
             # add the discrete tag to weights            
             self.params[self.W]=set(['discrete'])
         else:
@@ -98,7 +99,8 @@ class Conv2DLayer(lasagne.layers.Conv2DLayer): # H determines the range of the w
         self._srng = RandomStreams(lasagne.random.get_rng().randint(1, 2147462579))
         
         if self.discrete:
-            super(Conv2DLayer, self).__init__(incoming, num_filters, filter_size, W=lasagne.init.Uniform((-self.H,self.H)), **kwargs)   
+            # super(Conv2DLayer, self).__init__(incoming, num_filters, filter_size, W=lasagne.init.Uniform((-self.H,self.H)), **kwargs)   
+            super(Conv2DLayer, self).__init__(incoming, num_filters, filter_size, W=lasagne.init.Constant(self.H), **kwargs)   
             # add the discrete tag to weights            
             self.params[self.W]=set(['discrete'])
             
@@ -124,8 +126,17 @@ def discrete_grads(loss,network,LR):
     for layer in layers:
         params = layer.get_params(discrete=True)
         if params:
-            W_grads.append(theano.grad(loss, wrt=layer.W)) #Here layer.W = weight_tune(param) 
-    updates = lasagne.updates.adam(loss_or_grads=W_grads,params=W_params,learning_rate=LR)  
+            grad = theano.grad(loss, wrt=layer.W)
+            if lasagne.layers.count_params(layer) == 32*5*5+32 :
+                grad = theano.printing.Print('grad')(grad)
+            W_grads.append(grad)
+            # W_grads.append(theano.grad(loss, wrt=layer.W)) #Here layer.W = weight_tune(param) 
+    #updates = lasagne.updates.adam(loss_or_grads=W_grads,params=W_params,learning_rate=LR)  
+    updates = lasagne.updates.sgd(loss_or_grads=W_grads,params=W_params,learning_rate=LR)  
+
+    # updates_printed = T.printing.Print('updates', ['shape'])(updates)
+    # func = theano.function([u], updates)
+    # W_grads[0] = func([W_grads[0]])
 	
     for param, parambest in izip(W_params, best_params) :
 
@@ -148,7 +159,9 @@ def discrete_grads(loss,network,LR):
         Prob1= T.abs_(v1/L) #the transfer probability
         Prob1 = T.tanh(th*Prob1) #the nonlinear tanh() function accelerates the state transfer
 		   
-        delta_W2 = updates[param] - param 
+        delta_W2 = updates[param]
+        # delta_W2 = theano.printing.Print('update')(delta_W2)
+        delta_W2 = delta_W2 - param 
         delta_W2_direction = T.cast(T.sgn(delta_W2),theano.config.floatX)	   
         dis2=T.abs_(delta_W2) #the absolute distance
         k2=delta_W2_direction*T.floor(dis2/L) #the integer part
@@ -208,6 +221,7 @@ def train(  network,
 
         for i in range(batches):
             new_loss = train_fn(X[i*batch_size:(i+1)*batch_size],y[i*batch_size:(i+1)*batch_size],LR)
+            return new_loss#FIXME
             loss += new_loss
             
         
@@ -233,7 +247,7 @@ def train(  network,
         return err, loss               
     
     # shuffle the training set
-    X_train,y_train = shuffle(X_train,y_train)
+    # X_train,y_train = shuffle(X_train,y_train)
 	# initialize the err to be 100%
     best_val_err = 100
     best_test_err = 100
@@ -245,6 +259,8 @@ def train(  network,
 	
     verr = []
     tloss = []
+
+    np.set_printoptions(precision=6, linewidth=200, suppress=True)
     
     for epoch in range(num_epochs): 
         
@@ -268,7 +284,8 @@ def train(  network,
 
         train_loss = train_epoch(X_train,y_train,LR)
         
-        X_train,y_train = shuffle(X_train,y_train)
+        if epoch != 0:
+            X_train,y_train = shuffle(X_train,y_train)
         
         val_err, val_loss = val_epoch(X_val,y_val)
         test_err, test_loss = val_epoch(X_test,y_test)
@@ -297,6 +314,9 @@ def train(  network,
         print("  best test error rate:          "+str(best_test_err)+"%")
         print("  test loss:                     "+str(test_loss))
         print("  test error rate:               "+str(test_err)+"%") 
+
+        if epoch == 1:
+            break
         
         
      
@@ -480,7 +500,8 @@ if __name__ == "__main__":
     if discrete:  
         updates = discrete_grads(loss,cnn,LR)
         params = lasagne.layers.get_all_params(cnn, trainable=True, discrete=False)
-        updates = OrderedDict(updates.items() + lasagne.updates.adam(loss_or_grads=loss, params=params, learning_rate=LR).items())
+        #updates = OrderedDict(updates.items() + lasagne.updates.adam(loss_or_grads=loss, params=params, learning_rate=LR).items())
+        updates = OrderedDict(updates.items() + lasagne.updates.sgd(loss_or_grads=loss, params=params, learning_rate=LR).items())
         def fix_update_bcasts(updates):
             for param, update in updates.items():
                 if param.broadcastable != update.broadcastable:
