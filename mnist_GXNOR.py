@@ -142,11 +142,11 @@ def discrete_grads(loss,network,LR):
         
         delta_W1 =c*(state_rand-parambest) #parambest would transfer to state_rand with probability of a, or keep unmoved with probability of 1-a
         delta_W1_direction = T.cast(T.sgn(delta_W1),theano.config.floatX)
-	dis1=T.abs_(delta_W1) #the absolute distance
+        dis1=T.abs_(delta_W1) #the absolute distance
         k1=delta_W1_direction*T.floor(dis1/L) #the integer part
         v1=delta_W1-k1*L #the decimal part
         Prob1= T.abs_(v1/L) #the transfer probability
-	Prob1 = T.tanh(th*Prob1) #the nonlinear tanh() function accelerates the state transfer
+        Prob1 = T.tanh(th*Prob1) #the nonlinear tanh() function accelerates the state transfer
 		   
         delta_W2 = updates[param] - param 
         delta_W2_direction = T.cast(T.sgn(delta_W2),theano.config.floatX)	   
@@ -161,7 +161,8 @@ def discrete_grads(loss,network,LR):
         Gate2 = T.cast(srng.binomial(n=1, p=Prob2, size=T.shape(Prob2)), theano.config.floatX) # Gate2 is a binary variable with probability of Prob2 to be 1
 
         delta_W1_new=(k1+delta_W1_direction*Gate1)*L #delta_W1_new = k*L where k is an integer   
-        updates_param1 = T.clip(parambest + delta_W1_new,-H,H)
+#        updates_param1 = T.clip(parambest + delta_W1_new,-H,H)#TODO
+        updates_param1 = T.clip(parambest + delta_W1,-H,H)
         updates_param1 = weight_tune(updates_param1,-H,H) #fine tuning for guaranteeing each element strictly constrained in the discrete space
 
         delta_W2_new=(k2+delta_W2_direction*Gate2)*L #delta_W2_new = k*L where k is an integer  
@@ -325,11 +326,11 @@ if __name__ == "__main__":
     epsilon = 1e-4 
     print("epsilon = "+str(epsilon))
 	
-    batch_size = 10000 
+    batch_size = 100 
     print("batch_size = "+str(batch_size))
        
     # Training parameters
-    num_epochs = 4000 
+    num_epochs = 200 
     print("num_epochs = "+str(num_epochs))
     
 
@@ -466,13 +467,25 @@ if __name__ == "__main__":
     train_output = lasagne.layers.get_output(cnn, deterministic=False)
     best_params = lasagne.layers.get_all_params(cnn, discrete=True)
 	
+#    target = T.printing.Print('targets', ['shape'])(target)
+#    train_output = T.printing.Print('train_out', ['shape'])(train_output)
     # squared hinge loss
-    loss = T.mean(T.sqr(T.maximum(0.,1.-target*train_output)))
+#loss = T.mean(T.sqr(T.maximum(0.,1.-target*train_output)))
+    loss = T.sqr(T.maximum(0.,1.-target*train_output))
+#    loss = T.printing.Print('loss', ['shape'])(loss)
+    loss = T.mean(loss)
+#    loss = T.printing.Print('loss')(loss)
+
 
     if discrete:  
         updates = discrete_grads(loss,cnn,LR)
         params = lasagne.layers.get_all_params(cnn, trainable=True, discrete=False)
         updates = OrderedDict(updates.items() + lasagne.updates.adam(loss_or_grads=loss, params=params, learning_rate=LR).items())
+        def fix_update_bcasts(updates):
+            for param, update in updates.items():
+                if param.broadcastable != update.broadcastable:
+                    updates[param] = T.patternbroadcast(update, param.broadcastable)
+        fix_update_bcasts(updates)
         
     else:
         params = lasagne.layers.get_all_params(cnn, trainable=True)
