@@ -19,6 +19,7 @@ import theano.tensor as T
 # specifying the gpu to use
 import theano.sandbox.cuda
 theano.sandbox.cuda.use('gpu1') 
+theano.config.compute_test_value = 'warn'
 
 import lasagne
 
@@ -123,18 +124,28 @@ def discrete_grads(loss,network,LR):
     layers = lasagne.layers.get_all_layers(network)
 	
     W_grads = []
+    i = 0
+    #output, activation = lasagne.layers.get_output([output_layer, l0])
+    #loss = ...
+    #grad = T.grad(loss, activation)
     for layer in layers:
         params = layer.get_params(discrete=True)
         if params:
             grad = theano.grad(loss, wrt=layer.W)
-            if lasagne.layers.count_params(layer) == 32*5*5+32 :
-                grad = theano.printing.Print('grad')(grad)
+            # if lasagne.layers.count_params(layer) == 32*5*5+32 :
+            #if grad.shape == (512, 10):
+            grad = theano.printing.Print('grad_w '+layer.name)(grad)
             W_grads.append(grad)
             # W_grads.append(theano.grad(loss, wrt=layer.W)) #Here layer.W = weight_tune(param) 
+        i = i + 1
     #updates = lasagne.updates.adam(loss_or_grads=W_grads,params=W_params,learning_rate=LR)  
     updates = lasagne.updates.sgd(loss_or_grads=W_grads,params=W_params,learning_rate=LR)  
 
-    # updates_printed = T.printing.Print('updates', ['shape'])(updates)
+    i = 0
+    for param in W_params:
+        param_n = T.printing.Print('updates')(updates[param])
+    # updates = theano.printing.Print('updates')(updates_p)
+    # updates = theano.printing.Print('updates', ['shape'])(updates_p)
     # func = theano.function([u], updates)
     # W_grads[0] = func([W_grads[0]])
 	
@@ -185,7 +196,10 @@ def discrete_grads(loss,network,LR):
 	# if update_type<100, the weight probabilistically tranfers from parambest to state_rand, which helps to search the global minimum
         # elst it would probabilistically transfer from param to a state nearest to updates[param]		
         updates[param]= T.switch(T.lt(update_type,100), updates_param1, updates_param2)    
-    
+
+    for param in W_params:
+        param_n = T.printing.Print('discrete-updates')(updates[param])
+
     return updates
 
 
@@ -221,7 +235,7 @@ def train(  network,
 
         for i in range(batches):
             new_loss = train_fn(X[i*batch_size:(i+1)*batch_size],y[i*batch_size:(i+1)*batch_size],LR)
-            return new_loss#FIXME
+            # return new_loss#FIXME
             loss += new_loss
             
         
@@ -315,8 +329,8 @@ def train(  network,
         print("  test loss:                     "+str(test_loss))
         print("  test error rate:               "+str(test_err)+"%") 
 
-        if epoch == 1:
-            break
+        # if epoch == 1:
+        #     break
         
         
      
@@ -334,7 +348,7 @@ def train(  network,
     plt.xlabel('training epoch')
     plt.ylabel('training_loss')
     
-    plt.show()
+    #plt.show()
 
     
 
@@ -346,11 +360,11 @@ if __name__ == "__main__":
     epsilon = 1e-4 
     print("epsilon = "+str(epsilon))
 	
-    batch_size = 100 
+    batch_size = 5 
     print("batch_size = "+str(batch_size))
        
     # Training parameters
-    num_epochs = 200 
+    num_epochs = 3 
     print("num_epochs = "+str(num_epochs))
     
 
@@ -379,122 +393,120 @@ if __name__ == "__main__":
     print("LR_decay = "+str(LR_decay))
 
     print('Loading MNIST dataset...')
-    
-    train_set = MNIST(which_set= 'train', start=0, stop = 50000, center = False)
-    valid_set = MNIST(which_set= 'train', start=50000, stop = 60000, center = False)
-    test_set = MNIST(which_set= 'test', center = False)
-    
-    train_set.X = 2*train_set.X.reshape(-1, 1, 28, 28)-1.
-    valid_set.X = 2*valid_set.X.reshape(-1, 1, 28, 28)-1.
-    test_set.X = 2*test_set.X.reshape(-1, 1, 28, 28)-1.
 
-    train_set.y = np.hstack(train_set.y)
-    valid_set.y = np.hstack(valid_set.y)
-    test_set.y = np.hstack(test_set.y)
-    
-    train_set.y = np.float32(np.eye(10)[train_set.y])    
-    valid_set.y = np.float32(np.eye(10)[valid_set.y])
-    test_set.y = np.float32(np.eye(10)[test_set.y])
-    
-    train_set.y = 2* train_set.y - 1.
-    valid_set.y = 2* valid_set.y - 1.
-    test_set.y = 2* test_set.y - 1.
+    size_y = 3
+    size_x = 3
+    size_b = 5
+
+    X = np.float32(np.ones((size_b, 1, size_y, size_x)))
+    y = np.float32(np.zeros((size_b, 3)))
+    for i in range(size_b):
+        X[i] *= (i*0.1)
+        y[i] = -1
+        # y[i][random.randint(0, 3)] = 1
+        y[i][i%2==1] = 1
+    print('X = \n'+str(X))
+    print('y = \n'+str(y))
+
+    # test_out = np.float32(np.ones((size_b, 3)))
+    # test_target = np.float32(np.ones((size_b, 3))) * (-1)
+    # for i in range(size_b):
+    #     test_out[i] *= 5.8 + (i*0.1)
+    #     test_target[i][0] = 1
+    # to = T.matrix('testo')
+    # to.tag.test_value = test_out
+    # tt = T.matrix('testt')
+    # tt.tag.test_value = test_target
+    # to = T.printing.Print('test_out')(to)
+    # tt = T.printing.Print('test_target')(tt)
+    # l = T.sqr(T.maximum(0.,1.-tt*to))
+    # l = T.printing.Print('test_loss')(l)
+    # l = T.mean(l)
+    # g = theano.grad(l, wrt=to)
+    # g = theano.printing.Print('test_grad_loss')(g)
+
 
     print('Building the CNN...') 
     
     # Prepare Theano variables for inputs and targets
     input = T.tensor4('inputs')
     target = T.matrix('targets')
+    input.tag.test_value = X
+    target.tag.test_value = y
 
     LR = T.scalar('LR', dtype=theano.config.floatX)
+    LR.tag.test_value = LR_start
     
     update_type = 200 #intialize the update_type to be normal training
 
     cnn = lasagne.layers.InputLayer(
-            shape=(None, 1, 28, 28),
-            input_var=input) 
-    
-    cnn = Conv2DLayer(
-            cnn, 
-            discrete=discrete,
-            H=H,
-            N=N,
-            num_filters=32, 
-            filter_size=(5, 5),
-            pad = 'valid',
-            nonlinearity=lasagne.nonlinearities.identity)
+            shape=(None, 1, size_y, size_x),
+            input_var=input,
+            name='Input0') 
 
-    cnn = lasagne.layers.MaxPool2DLayer(cnn, pool_size=(2, 2))
-	
-    cnn = lasagne.layers.BatchNormLayer(
-                cnn,
-                epsilon=epsilon, 
-                alpha=alpha)
-				
-    cnn = lasagne.layers.NonlinearityLayer(
-            cnn,
-            nonlinearity=activation)
-			
-    cnn = Conv2DLayer(
-            cnn, 
-            discrete=discrete,
-            H=H,
-            N=N,
-            num_filters=64, 
-            filter_size=(5, 5),
-            pad = 'valid',
-            nonlinearity=lasagne.nonlinearities.identity)
-
-    cnn = lasagne.layers.MaxPool2DLayer(cnn, pool_size=(2, 2))
-	
-    cnn = lasagne.layers.BatchNormLayer(
-                cnn,
-                epsilon=epsilon, 
-                alpha=alpha)
-				
-    cnn = lasagne.layers.NonlinearityLayer(
-            cnn,
-            nonlinearity=activation)
-    
     cnn = DenseLayer(
                 cnn, 
                 discrete=discrete,
                 H=H,
                 N=N,
-                num_units=512,
-                nonlinearity=lasagne.nonlinearities.identity) 
+                num_units=6,
+                nonlinearity=lasagne.nonlinearities.identity,
+                name='Dense1') 
     
-    cnn = lasagne.layers.BatchNormLayer(
-                cnn,
-                epsilon=epsilon, 
-                alpha=alpha)
+    # cnn = Conv2DLayer(
+    #             cnn, 
+    #             discrete=discrete,
+    #             H=H,
+    #             N=N,
+    #             num_filters=2,
+    #             filter_size=(2, 2), 
+    #             pad = 'valid', 
+    #             nonlinearity=lasagne.nonlinearities.identity,
+    #             name='Conv1') 
+
+    # cnn = lasagne.layers.MaxPool2DLayer(cnn, pool_size=(2, 2), name='Pool2')
+    
     cnn = lasagne.layers.NonlinearityLayer(
             cnn,
-            nonlinearity=activation)
+            nonlinearity=activation,
+            name='Act2')
  
     cnn = DenseLayer(
                 cnn, 
                 discrete=discrete,
                 H=H,
                 N=N,
-                num_units=10,
-                nonlinearity=lasagne.nonlinearities.identity) 
-    cnn = lasagne.layers.BatchNormLayer(
-                cnn,
-                epsilon=epsilon, 
-                alpha=alpha)
+                num_units=3,
+                nonlinearity=lasagne.nonlinearities.identity,
+                name='Dense3') 
 
     train_output = lasagne.layers.get_output(cnn, deterministic=False)
     best_params = lasagne.layers.get_all_params(cnn, discrete=True)
 	
 #    target = T.printing.Print('targets', ['shape'])(target)
-#    train_output = T.printing.Print('train_out', ['shape'])(train_output)
+    train_output = T.printing.Print('train_out')(train_output)
     # squared hinge loss
 #loss = T.mean(T.sqr(T.maximum(0.,1.-target*train_output)))
     loss = T.sqr(T.maximum(0.,1.-target*train_output))
-#    loss = T.printing.Print('loss', ['shape'])(loss)
+    loss = T.printing.Print('loss', ['shape'])(loss)
+    loss = T.printing.Print('loss')(loss)
+    loss = T.mean(loss, axis=0)
+    loss = T.printing.Print('mean-loss')(loss)
     loss = T.mean(loss)
-#    loss = T.printing.Print('loss')(loss)
+    loss = T.printing.Print('batch-loss')(loss)
+
+    grad = theano.grad(loss, wrt=train_output)
+    grad = theano.printing.Print('grad-loss')(grad)
+    grad = T.mean(grad, axis=0)
+    grad = theano.printing.Print('grad-loss-mean')(grad)
+
+    outputs = lasagne.layers.get_output(lasagne.layers.get_all_layers(cnn), deterministic=False)
+    loss = T.mean(T.sqr(T.maximum(0.,1.-target*outputs[-1])))
+    for layer_out, layer in izip(outputs, lasagne.layers.get_all_layers(cnn)):
+        grad = theano.grad(loss, wrt=layer_out)
+        # theano.printing.pp(grad)
+        grad = theano.printing.Print('error '+layer.name)(grad)
+        print('\n')
 
 
     if discrete:  
@@ -527,7 +539,7 @@ if __name__ == "__main__":
             batch_size,
             LR_start,LR_decay,
             num_epochs,
-            train_set.X,train_set.y,
-            valid_set.X,valid_set.y,
-            test_set.X,test_set.y)
+            X,y,
+            X,y,
+            X,y)
 
